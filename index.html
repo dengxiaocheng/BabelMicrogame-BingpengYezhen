@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>病棚夜诊</title>
+  <style>
+    :root { --bg:#1a1a12; --fg:#e8e0cc; --accent:#c9a227; --card:#26261a; --border:#3d3d2a; --danger:#b33a3a; --success:#3a8a3a; --warn:#a07020; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { min-height:100vh; display:flex; justify-content:center; align-items:center; background:radial-gradient(ellipse at top,#2a2a1a,var(--bg)); color:var(--fg); font-family:"Noto Serif SC","Songti SC",serif; }
+    #app { width:min(640px,100%); padding:1.5rem; }
+    h1 { text-align:center; color:var(--accent); margin-bottom:1rem; letter-spacing:.2em; }
+    #status-bar { display:flex; gap:.8rem; flex-wrap:wrap; color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:.6rem; margin-bottom:1rem; font-size:.9rem; }
+    #phase-label { text-align:center; color:var(--accent); font-weight:bold; margin-bottom:.6rem; font-size:1.05rem; }
+    #narrative { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:1.2rem; min-height:100px; line-height:1.9; white-space:pre-wrap; margin-bottom:1rem; }
+    #patients { display:flex; flex-direction:column; gap:.5rem; margin-bottom:1rem; }
+    .patient-card { background:var(--card); border:1px solid var(--border); border-radius:4px; padding:.8rem 1rem; display:flex; justify-content:space-between; align-items:center; }
+    .patient-card.dead { opacity:.4; }
+    .patient-card .sev { color:var(--danger); font-weight:bold; }
+    .patient-card .sev.low { color:var(--success); }
+    .patient-card .sev.mid { color:var(--warn); }
+    #actions { display:flex; flex-direction:column; gap:.5rem; margin-bottom:1rem; }
+    .action-btn { background:var(--card); border:1px solid var(--border); color:var(--fg); padding:.7rem 1rem; border-radius:4px; cursor:pointer; text-align:left; font:inherit; }
+    .action-btn:hover:not(:disabled) { border-color:var(--accent); background:rgba(201,162,39,.1); }
+    .action-btn:disabled { opacity:.35; cursor:default; }
+    #feedback { margin-top:.8rem; padding:.8rem; border-left:3px solid var(--accent); background:rgba(201,162,39,.06); line-height:1.7; display:none; }
+    #ending { text-align:center; padding:2rem; display:none; }
+    #ending.survive h2 { color:var(--success); }
+    #ending.fail h2 { color:var(--danger); }
+    .next-btn { display:block; margin:1rem auto; background:var(--accent); color:var(--bg); border:none; padding:.6rem 2rem; border-radius:4px; cursor:pointer; font:inherit; font-weight:bold; }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <h1>病棚夜诊</h1>
+    <div id="status-bar"></div>
+    <div id="phase-label"></div>
+    <div id="narrative"></div>
+    <div id="patients"></div>
+    <div id="actions"></div>
+    <div id="feedback"></div>
+    <div id="ending"></div>
+  </main>
+  <script type="module">
+    import { createGame } from "./src/game.js";
+    import { GameController } from "./src/main.js";
+
+    const game = createGame();
+    const controller = new GameController(game, document.getElementById("app"));
+    controller.start();
+  </script>
+</body>
+</html>
