@@ -33,6 +33,8 @@ export class GameController {
 
     this.scene.onDrop((pid, actionKey) => this._handleDrop(pid, actionKey));
     this.scene.onPhase(() => this._enterTreat());
+    this.scene.onEndRound(() => this._resolve());
+    this.scene.onContinue(() => this._continueFromResolve());
   }
 
   start() {
@@ -82,19 +84,35 @@ export class GameController {
   }
 
   _resolve() {
-    this.g.phase = "resolve";
-    this._render();
+    const preAlive = this.g.patients.map(p => p.alive);
+    const preInfected = this.g.patients.map(p => p.infected);
 
     const endResult = nextRound(this.g);
     if (endResult) {
       this.g.ended = true;
       this.g.result = endResult.result;
       this.g.log.push(endResult.reason);
-    }
-
-    setTimeout(() => {
       this.dom.feedback.style.display = "none";
       this._render();
-    }, 400);
+      return;
+    }
+
+    const deaths = [];
+    const newInf = [];
+    for (let i = 0; i < this.g.patients.length; i++) {
+      if (preAlive[i] && !this.g.patients[i].alive) deaths.push(this.g.patients[i]);
+      if (!preInfected[i] && this.g.patients[i].infected) newInf.push(this.g.patients[i]);
+    }
+
+    this.g._resolveData = { deaths, newInf };
+    this.g.phase = "resolve";
+    this.dom.feedback.style.display = "none";
+    this._render();
+  }
+
+  _continueFromResolve() {
+    this.g.phase = "view";
+    delete this.g._resolveData;
+    this._render();
   }
 }

@@ -70,6 +70,14 @@ const SCENE_CSS = `
 
 .phase-btn{display:block;margin:.5rem auto;background:var(--accent);color:var(--bg);border:none;padding:.6rem 2rem;border-radius:4px;cursor:pointer;font:inherit;font-weight:bold;font-size:1rem;letter-spacing:.1em;transition:transform .15s}
 .phase-btn:hover{transform:scale(1.05)}
+.resolve-box{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:1rem;margin-bottom:.8rem;text-align:center}
+.resolve-title{color:var(--accent);font-size:.95rem;margin-bottom:.6rem;font-weight:bold}
+.resolve-item{font-size:.85rem;line-height:1.7}
+.resolve-item.death{color:var(--danger)}
+.resolve-item.infection{color:var(--warn)}
+.resolve-ok{font-size:.85rem;opacity:.6}
+.end-round-btn{display:block;margin:.6rem auto 0;background:transparent;border:1px solid var(--border);color:var(--fg);padding:.4rem 1.5rem;border-radius:4px;cursor:pointer;font:inherit;font-size:.85rem;transition:border-color .2s}
+.end-round-btn:hover{border-color:var(--accent);color:var(--accent)}
 `;
 
 const VIS = {
@@ -87,6 +95,8 @@ export class SceneRenderer {
     this.selectedAction = null;
     this._onDrop = null;
     this._onPhase = null;
+    this._onEndRound = null;
+    this._onContinue = null;
     this._injected = false;
   }
 
@@ -122,6 +132,8 @@ export class SceneRenderer {
       this._viewBtn();
     } else if (g.phase === "treat") {
       this._medBox(g, actions);
+    } else if (g.phase === "resolve") {
+      this._resolveBox(g);
     }
 
     this._narrative(g);
@@ -284,6 +296,14 @@ export class SceneRenderer {
     }
 
     box.appendChild(row);
+
+    // 结束本轮按钮：允许玩家跳过未治疗的病人
+    const endBtn = document.createElement("button");
+    endBtn.className = "end-round-btn";
+    endBtn.textContent = "\u7ED3\u675F\u672C\u8F6E";
+    endBtn.onclick = () => { if (this._onEndRound) this._onEndRound(); };
+    box.appendChild(endBtn);
+
     this.dom.actionsEl.appendChild(box);
   }
 
@@ -323,6 +343,48 @@ export class SceneRenderer {
     d.actionsEl.innerHTML = "";
   }
 
+  // ── 结算显示 ──────────────────────────────────────────────
+
+  _resolveBox(g) {
+    const data = g._resolveData || {};
+    const box = document.createElement("div");
+    box.className = "resolve-box";
+
+    let html = '<div class="resolve-title">\u2014\u2014 \u672C\u8F6E\u7ED3\u7B97 \u2014\u2014</div>';
+
+    const deaths = data.deaths || [];
+    const newInf = data.newInf || [];
+
+    if (deaths.length > 0) {
+      for (const p of deaths) {
+        html += '<div class="resolve-item death">\u{1F480} ' + p.name + ' \u672A\u80FD\u6491\u8FC7\u8FD9\u4E00\u8F6E</div>';
+      }
+    }
+
+    if (newInf.length > 0) {
+      for (const p of newInf) {
+        html += '<div class="resolve-item infection">\u2623\uFE0F ' + p.name + ' \u51FA\u73B0\u611F\u67D3\u8FF9\u8C61</div>';
+      }
+    }
+
+    if (deaths.length === 0 && newInf.length === 0) {
+      html += '<div class="resolve-ok">\u6682\u65E0\u91CD\u5927\u53D8\u5316</div>';
+    }
+
+    html += '<div style="margin-top:.5rem;font-size:.8rem;opacity:.7">'
+          + '\u7B2C ' + g.round + ' \u8F6E \u00B7 \u7A33\u5B9A ' + g.patients_stable
+          + ' \u00B7 \u836F\u54C1 ' + g.medicine + '</div>';
+
+    box.innerHTML = html;
+    this.dom.actionsEl.appendChild(box);
+
+    const btn = document.createElement("button");
+    btn.className = "phase-btn";
+    btn.textContent = "\u7EE7\u7EED";
+    btn.onclick = () => { if (this._onContinue) this._onContinue(); };
+    this.dom.actionsEl.appendChild(btn);
+  }
+
   // ── 反馈动画 ──────────────────────────────────────────────
 
   flashCard(pid, ok) {
@@ -347,6 +409,8 @@ export class SceneRenderer {
 
   // ── 回调注册 ──────────────────────────────────────────────
 
-  onDrop(fn)   { this._onDrop = fn; }
-  onPhase(fn)  { this._onPhase = fn; }
+  onDrop(fn)      { this._onDrop = fn; }
+  onPhase(fn)     { this._onPhase = fn; }
+  onEndRound(fn)  { this._onEndRound = fn; }
+  onContinue(fn)  { this._onContinue = fn; }
 }
