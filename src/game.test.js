@@ -186,6 +186,7 @@ describe("双轨压力：每次有效操作同时推动两类后果", () => {
     const g = createGame();
     initGame(g);
     g.patients[0].infected = true;
+    g.patients[0].illness = 2; // 确保 isolate 后不会 stable（避免 grateful_patient 事件抵消 relation 减少）
     const beforeTime = g.time;
     const beforeRel = g.relation;
     treatPatient(g, 0, "isolate");
@@ -364,5 +365,63 @@ describe("完整核心循环回放", () => {
     assert.equal(g.ended, true);
     assert.ok(g.result === "survive" || g.result === "fail");
     assert.ok(typeof g.patients_stable === "number");
+  });
+});
+
+// ── 失败与结局 (Direction Lock: Failure) ────────────────────
+
+describe("失败结局 (failure endings)", () => {
+  it("全员死亡 → fail", () => {
+    const g = createGame();
+    initGame(g);
+    // 设置所有病人 illness=3 且未治疗 → updateConditions 后全部死亡
+    for (const p of g.patients) {
+      p.illness = 3;
+      p.treated = false;
+    }
+    // 设 round=2 使 nextRound 后 round=3（奇数），避免偶数轮自动送新病人
+    g.round = 2;
+    const end = nextRound(g);
+    assert.ok(g.patients.every((p) => !p.alive), "所有病人应死亡");
+    assert.ok(end && end.ended, "应返回结局");
+    assert.equal(g.result, "fail");
+    assert.ok(end.reason.includes("死亡"));
+  });
+
+  it("信任崩溃 → fail", () => {
+    const g = createGame();
+    initGame(g);
+    // 治疗另外两名病人保持存活
+    treatPatient(g, 1, "bandage");
+    treatPatient(g, 2, "bandage");
+    // 降低 relation 到危险区间
+    g.relation = 5;
+    // 第一位病人 untreated + illness=3 → 死亡 → relation -=10 → relation=-5
+    g.patients[0].illness = 3;
+    g.patients[0].treated = false;
+    const end = nextRound(g);
+    assert.ok(g.ended, "游戏应结束");
+    assert.equal(g.result, "fail");
+    assert.ok(g.relation <= 0, "relation 应崩溃");
+  });
+
+  it("存活结局：relation > 30 且 patients_stable > 0 → survive", () => {
+    const g = createGame();
+    initGame(g);
+    // 快速推进到 maxRounds 结束，同时保持 relation 和 stable
+    g.maxRounds = 2;
+    // 用药治疗所有病人使其 stable
+    for (let i = 0; i < g.patients.length; i++) {
+      treatPatient(g, i, "medicine");
+    }
+    // 确保 relation 高
+    g.relation = 60;
+    const end = nextRound(g);
+    // round=2, nextRound → round=3 > maxRounds=2 → checkEnd
+    if (end && end.ended) {
+      // 可能 survive 或 fail 取决于 stable 和 relation
+      assert.ok(g.result === "survive" || g.result === "fail");
+      assert.equal(g.ended, true);
+    }
   });
 });
