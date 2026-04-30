@@ -12,6 +12,22 @@
  *   pressure → 累积压力 / 进度压力
  */
 
+import {
+  triggerEvents,
+  createEventTracker,
+  ROUND_START_EVENTS,
+  POST_TREAT_EVENTS,
+  CRISIS_EVENTS,
+} from "./content/events.js";
+import {
+  getSymptomDetail,
+  getTreatResult,
+  getConditionShift,
+  INFECTION_FLAVOR,
+  getMedicineStatus,
+  getTimeStatus,
+} from "./content/descriptions.js";
+
 // ── 病人模板 ──────────────────────────────────────────────
 
 const SYMPTOM_POOL = ["高热", "咳血", "外伤", "腹泻", "昏迷", "皮疹", "气喘"];
@@ -61,7 +77,9 @@ export function initGame(g) {
   g.log = [];
   g.ended = false;
   g.result = null;
+  g._events = createEventTracker();
   addLog(g, "夜色降临，三名伤患被送入病棚。药品有限，时间紧迫。");
+  addLog(g, getMedicineStatus(g));
   return g;
 }
 
@@ -70,17 +88,23 @@ export function initGame(g) {
 export function startViewPhase(g) {
   g.phase = "view";
   const alive = g.patients.filter((p) => p.alive);
-  addLog(g, describePatients(alive));
-  return g;
-}
 
-function describePatients(patients) {
-  return patients
-    .map(
-      (p) =>
-        `${p.name}：${p.symptom}（危重${"!".repeat(p.illness)}）${p.infected ? " [已感染]" : ""}${p.stable ? " [稳定]" : ""}`
-    )
-    .join("\n");
+  // 丰富描述：每个病人显示症状详情
+  for (const p of alive) {
+    addLog(g, `${p.name}：${getSymptomDetail(p)}`);
+  }
+
+  // 状态提示：药箱和时间
+  if (g.round > 1) {
+    addLog(g, getMedicineStatus(g));
+    addLog(g, getTimeStatus(g));
+  }
+
+  // 触发轮次开始事件
+  triggerEvents(g, ROUND_START_EVENTS, null, g._events.fired);
+  triggerEvents(g, CRISIS_EVENTS, null, g._events.fired);
+
+  return g;
 }
 
 // ── 核心循环: 选择治疗动作 → 消耗时间/药品 ────────────────
@@ -108,6 +132,9 @@ export function treatPatient(g, patientIdx, actionKey) {
   // 消耗药品
   if (action.medicineCost > 0 && g.medicine < action.medicineCost) return false;
 
+  // 记录治疗前状态（用于描述选择）
+  const prevIllness = patient.illness;
+
   // 扣除资源
   g.time -= action.timeCost;
   if (action.medicineCost > 0) g.medicine -= action.medicineCost;
@@ -121,7 +148,6 @@ export function treatPatient(g, patientIdx, actionKey) {
       patient.illness = Math.max(0, patient.illness - 2);
       g.relation += 5;
       if (patient.illness === 0) patient.stable = true;
-      addLog(g, `你为 ${patient.name} 用药，症状缓解。药品 -1，时间 -1`);
       break;
 
     case "bandage":
@@ -129,14 +155,12 @@ export function treatPatient(g, patientIdx, actionKey) {
       patient.illness = Math.max(0, patient.illness - 1);
       g.relation += 2;
       if (patient.illness === 0) patient.stable = true;
-      addLog(g, `你为 ${patient.name} 包扎，略有好转。时间 -1`);
       break;
 
     case "observe":
       // 生存: illness 不变，时间多消耗  |  关系: 信任 -2（病人不安）
       g.relation -= 2;
       g.pressure += 2;
-      addLog(g, `你选择继续观察 ${patient.name}。病人感到不安。时间 -2，信任 -2`);
       break;
 
     case "isolate":
@@ -145,9 +169,14 @@ export function treatPatient(g, patientIdx, actionKey) {
       patient.illness = Math.max(0, patient.illness - 1);
       g.relation -= 3;
       if (patient.illness === 0) patient.stable = true;
-      addLog(g, `你将 ${patient.name} 隔离。感染清除，但信任下降。时间 -1`);
       break;
   }
+
+  // 用内容池生成治疗结果描述
+  addLog(g, getTreatResult(actionKey, patient, prevIllness));
+
+  // 触发治疗后事件
+  triggerEvents(g, POST_TREAT_EVENTS, patient, g._events.fired);
 
   return true;
 }
@@ -155,6 +184,8 @@ export function treatPatient(g, patientIdx, actionKey) {
 // ── 核心循环: 病势更新 ────────────────────────────────────
 
 export function updateConditions(g) {
+  const died = [];
+
   for (const p of g.patients) {
     if (!p.alive) continue;
     if (!p.treated) {
@@ -164,8 +195,13 @@ export function updateConditions(g) {
     if (p.illness >= 4) {
       p.alive = false;
       g.relation -= 10;
-      addLog(g, `${p.name} 病情恶化，不治身亡。信任 -10`);
+      died.push(p);
     }
+  }
+
+  // 病势更新叙事
+  if (died.length > 0 || g.pressure > 5) {
+    addLog(g, getConditionShift(g, died));
   }
 }
 
@@ -191,7 +227,7 @@ export function spreadInfection(g) {
       if (!n.infected && Math.random() < g.infection.risk * 0.15) {
         n.infected = true;
         g.infection.spreadCount += 1;
-        addLog(g, `${n.name} 被 ${alive[i].name} 传染！`);
+        addLog(g, INFECTION_FLAVOR.spread(alive[i], n));
       }
     }
   }
@@ -202,7 +238,12 @@ export function spreadInfection(g) {
     const target = uninfected[Math.floor(Math.random() * uninfected.length)];
     target.infected = true;
     g.infection.spreadCount += 1;
-    addLog(g, `${target.name} 出现感染迹象。`);
+    addLog(g, INFECTION_FLAVOR.new_infection(target));
+  }
+
+  // 感染氛围描写
+  if (g.infection.spreadCount > 0 && g.infection.risk > 1.5) {
+    addLog(g, INFECTION_FLAVOR.air_heavy);
   }
 }
 
