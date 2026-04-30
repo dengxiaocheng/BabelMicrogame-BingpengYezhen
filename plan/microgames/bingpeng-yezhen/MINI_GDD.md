@@ -13,11 +13,11 @@
 
 ## State
 
-- resource
-- pressure
-- risk
-- relation
-- round
+- medicine
+- time
+- illness
+- infection
+- patients_stable
 
 ## UI
 
