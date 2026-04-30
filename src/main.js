@@ -50,12 +50,12 @@ export class GameController {
   }
 
   renderStatus() {
-    const { resource, pressure, risk, relation, round, maxRounds } = this.g;
+    const { medicine, time, infection, patients_stable, round, maxRounds } = this.g;
     this.statusBar.innerHTML = [
-      `药品: ${resource}`,
-      `压力: ${pressure}`,
-      `感染风险: ${risk.toFixed(1)}`,
-      `信任: ${relation}`,
+      `药品: ${medicine}`,
+      `时间: ${time}`,
+      `感染风险: ${infection.risk.toFixed(1)}`,
+      `稳定: ${patients_stable}`,
       `第 ${round}/${maxRounds} 轮`,
     ]
       .map((s) => `<span>${s}</span>`)
@@ -82,9 +82,8 @@ export class GameController {
       const card = document.createElement("div");
       card.className = "patient-card" + (p.alive ? "" : " dead");
 
-      const sevClass = p.severity <= 1 ? "low" : p.severity <= 2 ? "mid" : "";
       const state = p.alive
-        ? `${p.symptom} | 危重 <span class="sev ${sevClass}">${"!".repeat(p.severity)}</span>${p.infected ? " [感染]" : ""}${p.treated ? " [已处理]" : ""}`
+        ? `${p.symptom} | 危重 ${"!".repeat(p.illness)}${p.infected ? " [感染]" : ""}${p.stable ? " [稳定]" : ""}${p.treated ? " [已处理]" : ""}`
         : "—— 已死亡 ——";
 
       card.innerHTML = `<strong>${p.name}</strong><span>${state}</span>`;
@@ -121,10 +120,16 @@ export class GameController {
       }
 
       for (const [key, act] of Object.entries(ACTIONS)) {
-        const disabled =
-          act.cost === "resource" && this.g.resource < act.amount;
+        const noMedicine = act.medicineCost > 0 && this.g.medicine < act.medicineCost;
+        const noTime = this.g.time < act.timeCost;
+        const disabled = noMedicine || noTime;
+
+        const costs = [];
+        if (act.medicineCost > 0) costs.push(`药品 -${act.medicineCost}`);
+        costs.push(`时间 -${act.timeCost}`);
+
         const btn = this.makeBtn(
-          `${act.label}（${act.cost === "resource" ? `药品 -${act.amount}` : `压力 +${act.amount}`}）`,
+          `${act.label}（${costs.join("，")}）`,
           () => this.doTreat(key),
           disabled
         );
@@ -148,7 +153,7 @@ export class GameController {
     this.endingEl.innerHTML = `
       <h2>${this.g.result === "survive" ? "存活" : "失败"}</h2>
       <p>${reason}</p>
-      <p style="margin-top:1rem;color:var(--fg)">最终 — 信任:${this.g.relation} 药品:${this.g.resource} 轮次:${this.g.round}</p>
+      <p style="margin-top:1rem;color:var(--fg)">最终 — 稳定:${this.g.patients_stable} 药品:${this.g.medicine} 轮次:${this.g.round}</p>
       <button class="next-btn" onclick="location.reload()">再来一次</button>
     `;
     this.statusBar.innerHTML = "";

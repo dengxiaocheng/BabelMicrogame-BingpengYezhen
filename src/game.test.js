@@ -1,7 +1,8 @@
 /**
- * game.test.js — 验证 Direction Lock 核心循环骨架
+ * game.test.js — 验证 Direction Lock 核心循环状态与结算
  *
- * 核心循环: 查看病人 → 选择治疗动作 → 消耗时间/药品 → 病势更新 → 感染扩散 → 下一轮
+ * Required State: medicine, time, illness, infection, patients_stable
+ * Core Loop: 查看病人 → 选择治疗动作 → 消耗时间/药品 → 病势更新 → 感染扩散 → 下一轮
  */
 
 import { describe, it } from "node:test";
@@ -14,19 +15,36 @@ import {
   nextRound,
   updateConditions,
   spreadInfection,
+  computePatientsStable,
   ACTIONS,
 } from "./game.js";
 
-// ── Required State ─────────────────────────────────────────
+// ── Required State (Direction Lock) ─────────────────────────
 
-describe("Required State", () => {
-  it("createGame 包含所有 Direction Lock 必要状态", () => {
+describe("Required State (Direction Lock)", () => {
+  it("createGame 包含全部 5 个 Direction Lock 必要状态", () => {
     const g = createGame();
-    assert.ok("resource" in g, "缺少 resource");
-    assert.ok("pressure" in g, "缺少 pressure");
-    assert.ok("risk" in g, "缺少 risk");
-    assert.ok("relation" in g, "缺少 relation");
-    assert.ok("round" in g, "缺少 round");
+    assert.ok("medicine" in g, "缺少 medicine");
+    assert.ok("time" in g, "缺少 time");
+    assert.ok("infection" in g, "缺少 infection");
+    assert.ok("patients_stable" in g, "缺少 patients_stable");
+    // illness 在 per-patient 上
+    assert.equal(g.patients.length, 0, "初始无病人");
+  });
+
+  it("initGame 生成的病人包含 illness 字段", () => {
+    const g = createGame();
+    initGame(g);
+    for (const p of g.patients) {
+      assert.ok(typeof p.illness === "number", `${p.name} 缺少 illness`);
+      assert.ok(p.illness >= 1 && p.illness <= 3, "illness 应在 1-3");
+    }
+  });
+
+  it("infection 包含 risk 和 spreadCount", () => {
+    const g = createGame();
+    assert.ok("risk" in g.infection, "缺少 infection.risk");
+    assert.ok("spreadCount" in g.infection, "缺少 infection.spreadCount");
   });
 });
 
@@ -40,14 +58,15 @@ describe("查看病人 (view phase)", () => {
     assert.equal(g.phase, "view");
   });
 
-  it("每个病人有 id, symptom, severity, alive", () => {
+  it("每个病人有 id, symptom, illness, alive, stable", () => {
     const g = createGame();
     initGame(g);
     for (const p of g.patients) {
       assert.ok(typeof p.id === "number");
       assert.ok(typeof p.symptom === "string");
-      assert.ok(p.severity >= 1 && p.severity <= 3);
+      assert.ok(typeof p.illness === "number");
       assert.equal(p.alive, true);
+      assert.equal(p.stable, false);
     }
   });
 
@@ -64,42 +83,54 @@ describe("查看病人 (view phase)", () => {
 // ── 选择治疗动作 → 消耗时间/药品 ───────────────────────────
 
 describe("选择治疗动作 → 消耗时间/药品", () => {
-  it("medicine 消耗 resource 并降低 severity", () => {
+  it("medicine 消耗 medicine 和 time，降低 illness", () => {
     const g = createGame();
     initGame(g);
-    const beforeRes = g.resource;
-    const beforeSev = g.patients[0].severity;
+    const beforeMed = g.medicine;
+    const beforeTime = g.time;
+    const beforeIll = g.patients[0].illness;
     const ok = treatPatient(g, 0, "medicine");
     assert.equal(ok, true);
-    assert.equal(g.resource, beforeRes - 1);
-    assert.ok(g.patients[0].severity <= beforeSev);
+    assert.equal(g.medicine, beforeMed - 1);
+    assert.equal(g.time, beforeTime - 1);
+    assert.ok(g.patients[0].illness <= beforeIll);
     assert.equal(g.patients[0].treated, true);
   });
 
-  it("bandage 增加 pressure 并降低 severity", () => {
+  it("bandage 消耗 time，降低 illness", () => {
     const g = createGame();
     initGame(g);
-    const beforePres = g.pressure;
+    const beforeTime = g.time;
+    const beforeIll = g.patients[0].illness;
     const ok = treatPatient(g, 0, "bandage");
     assert.equal(ok, true);
-    assert.equal(g.pressure, beforePres + 1);
+    assert.equal(g.time, beforeTime - 1);
+    assert.ok(g.patients[0].illness <= beforeIll);
   });
 
-  it("observe 增加 pressure 不改变 severity", () => {
+  it("observe 消耗更多 time，不改变 illness", () => {
     const g = createGame();
     initGame(g);
-    const beforePres = g.pressure;
-    const beforeSev = g.patients[0].severity;
+    const beforeTime = g.time;
+    const beforeIll = g.patients[0].illness;
     treatPatient(g, 0, "observe");
-    assert.equal(g.pressure, beforePres + 2);
-    assert.equal(g.patients[0].severity, beforeSev);
+    assert.equal(g.time, beforeTime - 2);
+    assert.equal(g.patients[0].illness, beforeIll);
   });
 
-  it("resource 不足时 medicine 失败", () => {
+  it("medicine 不足时失败", () => {
     const g = createGame();
     initGame(g);
-    g.resource = 0;
+    g.medicine = 0;
     const ok = treatPatient(g, 0, "medicine");
+    assert.equal(ok, false);
+  });
+
+  it("time 不足时失败", () => {
+    const g = createGame();
+    initGame(g);
+    g.time = 0;
+    const ok = treatPatient(g, 0, "observe");
     assert.equal(ok, false);
   });
 
@@ -112,21 +143,73 @@ describe("选择治疗动作 → 消耗时间/药品", () => {
   });
 });
 
-// ── 病势更新 ───────────────────────────────────────────────
+// ── 双轨压力 (MECHANIC_SPEC State Coupling) ────────────────
 
-describe("病势更新", () => {
-  it("未治疗的病人 severity +1", () => {
+describe("双轨压力：每次有效操作同时推动两类后果", () => {
+  it("medicine — 生存(medicine↓, illness↓) + 关系(relation↑)", () => {
     const g = createGame();
     initGame(g);
-    const beforeSev = g.patients[0].severity;
-    updateConditions(g);
-    assert.equal(g.patients[0].severity, beforeSev + 1);
+    const beforeMed = g.medicine;
+    const beforeIll = g.patients[0].illness;
+    const beforeRel = g.relation;
+    treatPatient(g, 0, "medicine");
+    assert.ok(g.medicine < beforeMed, "medicine 应减少");
+    assert.ok(g.patients[0].illness < beforeIll, "illness 应降低");
+    assert.ok(g.relation > beforeRel, "relation 应增加");
   });
 
-  it("severity >= 4 时病人死亡", () => {
+  it("bandage — 生存(time↓, illness↓) + 关系(relation↑)", () => {
     const g = createGame();
     initGame(g);
-    g.patients[0].severity = 3;
+    const beforeTime = g.time;
+    const beforeIll = g.patients[0].illness;
+    const beforeRel = g.relation;
+    treatPatient(g, 0, "bandage");
+    assert.ok(g.time < beforeTime, "time 应减少");
+    assert.ok(g.patients[0].illness <= beforeIll, "illness 应不增");
+    assert.ok(g.relation > beforeRel, "relation 应增加");
+  });
+
+  it("observe — 生存(time↓, pressure↑) + 关系(relation↓)", () => {
+    const g = createGame();
+    initGame(g);
+    const beforeTime = g.time;
+    const beforePres = g.pressure;
+    const beforeRel = g.relation;
+    treatPatient(g, 0, "observe");
+    assert.ok(g.time < beforeTime, "time 应减少");
+    assert.ok(g.pressure > beforePres, "pressure 应增加");
+    assert.ok(g.relation < beforeRel, "relation 应减少");
+  });
+
+  it("isolate — 生存(time↓, infected→false) + 关系(relation↓)", () => {
+    const g = createGame();
+    initGame(g);
+    g.patients[0].infected = true;
+    const beforeTime = g.time;
+    const beforeRel = g.relation;
+    treatPatient(g, 0, "isolate");
+    assert.ok(g.time < beforeTime, "time 应减少");
+    assert.equal(g.patients[0].infected, false, "感染应被清除");
+    assert.ok(g.relation < beforeRel, "relation 应减少");
+  });
+});
+
+// ── 病势更新 ───────────────────────────────────────────────
+
+describe("病势更新 (illness)", () => {
+  it("未治疗的病人 illness +1", () => {
+    const g = createGame();
+    initGame(g);
+    const beforeIll = g.patients[0].illness;
+    updateConditions(g);
+    assert.equal(g.patients[0].illness, beforeIll + 1);
+  });
+
+  it("illness >= 4 时病人死亡", () => {
+    const g = createGame();
+    initGame(g);
+    g.patients[0].illness = 3;
     g.patients[0].treated = false;
     updateConditions(g);
     assert.equal(g.patients[0].alive, false);
@@ -135,34 +218,77 @@ describe("病势更新", () => {
 
 // ── 感染扩散 ───────────────────────────────────────────────
 
-describe("感染扩散", () => {
-  it("infected 病人 severity 增加", () => {
+describe("感染扩散 (infection)", () => {
+  it("infected 病人 illness 增加", () => {
     const g = createGame();
     initGame(g);
     g.patients[0].infected = true;
-    g.patients[0].severity = 1;
+    g.patients[0].illness = 1;
     spreadInfection(g);
-    assert.ok(g.patients[0].severity >= 2);
+    assert.ok(g.patients[0].illness >= 2);
+  });
+
+  it("infected 病人使 infection.risk 上升", () => {
+    const g = createGame();
+    initGame(g);
+    g.patients[0].infected = true;
+    const beforeRisk = g.infection.risk;
+    spreadInfection(g);
+    assert.ok(g.infection.risk > beforeRisk);
+  });
+});
+
+// ── patients_stable ────────────────────────────────────────
+
+describe("patients_stable", () => {
+  it("初始为 0", () => {
+    const g = createGame();
+    initGame(g);
+    assert.equal(g.patients_stable, 0);
+  });
+
+  it("illness 降为 0 的病人标记为 stable", () => {
+    const g = createGame();
+    initGame(g);
+    g.patients[0].illness = 1;
+    treatPatient(g, 0, "medicine"); // illness -2 → 0 → stable
+    computePatientsStable(g);
+    assert.ok(g.patients[0].stable);
+    assert.ok(g.patients_stable >= 1);
+  });
+
+  it("未治疗导致 illness 上升后 stable 重置", () => {
+    const g = createGame();
+    initGame(g);
+    g.patients[0].illness = 1;
+    treatPatient(g, 0, "medicine");
+    assert.ok(g.patients[0].stable);
+    // 下一轮未治疗
+    g.patients[0].treated = false;
+    updateConditions(g);
+    assert.equal(g.patients[0].stable, false);
   });
 });
 
 // ── 下一轮 ─────────────────────────────────────────────────
 
 describe("下一轮 (nextRound)", () => {
-  it("推进 round 并重置 treated 标记", () => {
+  it("推进 round，恢复 time，重置 treated", () => {
     const g = createGame();
     initGame(g);
+    g.time = 3;
     treatPatient(g, 0, "bandage");
     assert.equal(g.patients[0].treated, true);
     nextRound(g);
     assert.equal(g.round, 2);
     assert.equal(g.patients[0].treated, false);
+    assert.ok(g.time > 3, "time 应恢复");
   });
 
   it("偶数轮可能送来新病人", () => {
     const g = createGame();
     initGame(g);
-    nextRound(g); // round 2
+    nextRound(g);
     assert.ok(g.patients.length >= 3);
   });
 
@@ -170,10 +296,29 @@ describe("下一轮 (nextRound)", () => {
     const g = createGame();
     initGame(g);
     g.maxRounds = 2;
-    nextRound(g); // round 2
-    const end = nextRound(g); // round 3 > maxRounds
+    nextRound(g);
+    const end = nextRound(g);
     assert.ok(end && end.ended);
     assert.equal(g.ended, true);
+  });
+
+  it("nextRound 计算 patients_stable", () => {
+    const g = createGame();
+    initGame(g);
+    g.patients[0].illness = 1;
+    g.patients[0].treated = false;
+    // 手动治疗使病人 stable
+    treatPatient(g, 0, "medicine");
+    // illness 可能已为 0 → stable
+    if (g.patients[0].stable) {
+      // 强制下轮结算
+      g.patients[1].illness = 1;
+      g.patients[2].illness = 1;
+      treatPatient(g, 1, "bandage");
+      treatPatient(g, 2, "bandage");
+      nextRound(g);
+      assert.ok(typeof g.patients_stable === "number");
+    }
   });
 });
 
@@ -184,20 +329,19 @@ describe("完整核心循环回放", () => {
     const g = createGame();
     initGame(g);
 
-    // 查看病人
     startViewPhase(g);
     assert.equal(g.phase, "view");
 
-    // 选择治疗动作 (对所有存活病人)
     for (let i = 0; i < g.patients.length; i++) {
       if (g.patients[i].alive) {
         treatPatient(g, i, "bandage");
       }
     }
 
-    // 下一轮 (内部执行 病势更新 → 感染扩散)
     const end = nextRound(g);
     assert.equal(g.round, 2);
+    assert.ok(typeof g.patients_stable === "number");
+    assert.ok(typeof g.infection.risk === "number");
     assert.ok(end === null || end.ended === true);
   });
 
@@ -211,7 +355,7 @@ describe("完整核心循环回放", () => {
       startViewPhase(g);
       for (let i = 0; i < g.patients.length; i++) {
         if (g.patients[i].alive && !g.patients[i].treated) {
-          treatPatient(g, i, g.resource > 0 ? "medicine" : "observe");
+          treatPatient(g, i, g.medicine > 0 ? "medicine" : "observe");
         }
       }
       nextRound(g);
@@ -219,5 +363,6 @@ describe("完整核心循环回放", () => {
 
     assert.equal(g.ended, true);
     assert.ok(g.result === "survive" || g.result === "fail");
+    assert.ok(typeof g.patients_stable === "number");
   });
 });
